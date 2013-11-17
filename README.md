@@ -20,13 +20,15 @@ Requirements
 
 This system was built on the following test environemnt:
 
-* Centos 6.4 (local VM instance)
-* Percona Server 5.5 (local instance)
+* Centos 6.4
+* Percona Server 5.5 
 * Capistrano (2.9.0) [website](http://www.capistranorb.com)
-  * Requires Ruby, Rubygem (1.8.7 for testing)
+  * Requires Ruby (1.8.7), Rubygem (2.1.10)
 * Liquibase (2.0.5) [website](http://www.liquibase.org)
-  * Requires java (1.5 for testing) and Java MySQL connector
+  * Requires java (1.5, simple yum install java) and Java MySQL connector
 * pt-online-schema-change [website](http://www.percona.com/doc/percona-toolkit/2.2/pt-online-schema-change.html)
+
+_Note this was a local test VM and versions were just supplied by default yum installs_
 
 Naturally, setting these up is outside the scope of this README, but one thing I will note - when setting up using standard "yum" commands, you 
 will need to specify the version of Capistrano as the current version doesn't work with the default Ruby/Rubygem install:

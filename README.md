@@ -23,9 +23,9 @@ This system was built on the following test environemnt:
 * Centos 6.4 (local VM instance)
 * Percona Server 5.5 (local instance)
 * Capistrano (2.9.0) [website](http://www.capistranorb.com)
-  * Requires Ruby, Rubygem (1.8.7 used for test instance)
+  * Requires Ruby, Rubygem (1.8.7 for testing)
 * Liquibase (2.0.5) [website](http://www.liquibase.org)
-  * Requires java (1.5 used for testing) and java MySQL connector
+  * Requires java (1.5 for testing) and Java MySQL connector
 * pt-online-schema-change [website](http://www.percona.com/doc/percona-toolkit/2.2/pt-online-schema-change.html)
 
 Naturally, setting these up is outside the scope of this README, but one thing I will note - when setting up using standard "yum" commands, you 
@@ -49,11 +49,11 @@ To use, simply create a new, empty database (mydb in this case) and then run the
 time changing the real changelog file the master file points to:
 
 ```
-<include file="samles/changelog_01.xml" relativeToChangelogFile="true"/>
+<include file="samples/changelog_01.xml" relativeToChangelogFile="true"/>
 ```
 
-Once you've applied the 3 changelog files, you can run the **clean_old_tables** task to drop the old tables left by pt-osc. 
-__Note - these tables are left by adding the --no-drop-table flag to pt-osc to help with rollbacks__
+Once you've applied the 3 changelog files, you can run the **clean_old_tables** task to drop the old tables left by pt-osc.
+_Note - these tables are left by adding the --no-drop-table flag to pt-osc to help with rollbacks_
 
 The samples directory also contains the mysqldump output of the test schema after applying the chnages and also one showing the cleanup.
  

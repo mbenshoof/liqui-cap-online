@@ -1,0 +1,299 @@
+role :libs, "localhost"
+
+set(:test_db_change_log_dir, '/root/liqui-cap-online') unless exists?(:test_base_dir)
+set(:test_db_driver, 'com.mysql.jdbc.Driver') unless exists?(:test_db_driver)
+set(:test_db_change_log_file, 'changelog.xml') unless exists?(:test_db_change_log_file)
+set(:test_db_mysql_jar_file, 'mysql-connector-java-5.1.27-bin.jar') unless exists?(:test_db_mysql_jar_file)
+set(:test_db_liquibase_version, '2.0.5') unless exists?(:test_db_liquibase_version)
+
+set :test_bin_dir do
+    "#{test_db_change_log_dir}/bin"
+end
+set :test_db_classpath do
+    "#{test_bin_dir}/#{test_db_mysql_jar_file}"
+end
+set :test_db_liquibase_script do 
+    "#{test_bin_dir}/liquibase-#{test_db_liquibase_version}/liquibase"
+end
+
+set :test_db_pt_osc_script do
+    "#{test_bin_dir}/pt-online-schema-change"
+end
+
+# Global variables needed (likely set elsewhere)
+set(:test_db_username, 'myuser') unless exists?(:test_db_username)
+set(:test_db_password, 'secret') unless exists?(:test_db_password)
+set(:test_db_name, 'mydb') unless exists?(:test_db_name)
+set(:test_db_url, 'jdbc:mysql://localhost/mydb?useJvmCharsetConverters=true') unless exists?(:test_db_url)
+
+set(:test_liquibase_verbose, true) unless exists?(:test_liquibase_verbose)
+
+
+####
+# Capistrano task to parse Liquibase output and handle accordingly
+####
+task :run_liquibase_alters do
+
+  alter_statements = fetch_liquid_alters()
+  consoleDebug("Parsing the Liquidbase alters...")
+  run_liquid_alters(alter_statements)
+
+end
+
+####
+# Capistrano task to get the current status
+####
+task :liquibase_status do
+  puts run_liquibase_command("status")
+end
+
+####
+# Capistrano task to clean up old tables
+####
+task :clean_old_tales do
+  clean_pt_osc_tables()
+end
+
+####
+# Run the Liquibase command to determine the SQL needed for this changeset
+####
+def fetch_liquid_alters()
+  run_liquibase_command("updateSQL")
+end
+ 
+####
+# Loop through the Liquibase output and run/translate the SQL statements
+####
+def run_liquid_alters(alters)
+
+  for line in alters.split(/\r?\n/)
+
+    # Skip comment or blank lines
+    if line.start_with?("-") or line.strip == ""
+      next
+    end
+
+    # Skip Liquidbase metadata lines
+    if line.start_with?("INFO") or line.start_with?("Liquibase")
+      next
+    end    
+    
+    handle_sql(line)
+
+  end
+
+end
+
+####
+# Determine the SQL statement and handle it properly
+####
+def handle_sql(sql_line)
+
+  if sql_line.start_with?("ALTER TABLE")
+    run_pt_osc(sql_line)
+  elsif sql_line.start_with?("CREATE INDEX")
+    converted_alter = parse_create_index(sql_line)
+    run_pt_osc(converted_alter)
+  else
+    run_native_sql(sql_line)
+  end
+
+end
+
+####
+# Run a native ALTER statement through pt-osc
+####
+def run_pt_osc(alter_sql)
+
+  consoleDebug("Run pt-osc for:")
+  consoleDebug(alter_sql)
+
+  stripped_sql = alter_sql.sub("ALTER TABLE ", "")
+  parts = stripped_sql.split(" ", 2)
+
+  tbl_name = parts[0].gsub("`", "")
+  alter_statement = parts[1].gsub(";", "")
+
+  pt_osc = "pt-online-schema-change --user #{test_db_username} --password #{test_db_password} --alter \"#{alter_statement}\" --no-drop-old-table --execute D=#{test_db_name},t=#{tbl_name}"
+  consoleDebug(pt_osc)
+
+  require 'open3'
+  Open3.popen3(
+      test_db_pt_osc_script,
+      "--user",
+      test_db_username,
+      "--password",
+      test_db_password,
+      "--alter",
+      alter_statement,
+      "--no-drop-old-table",
+      "--execute",
+      "D=#{test_db_name},t=#{tbl_name}") {|stdin, stdout, stderr|
+
+      output = stdout.gets(nil)
+      error = stderr.gets(nil)
+          
+      if !error.nil? 
+        abort "ERROR: pt-osc failed: #{error}"   
+      end
+
+      consoleDebug(output)
+  }
+
+end
+
+####
+# Convert a "CREATE INDEX" statement into an "ALTER TABLE" statement for pt-osc
+####
+def parse_create_index(create_sql)
+
+  consoleDebug("Parse this create index:")
+  consoleDebug(create_sql)
+  init_split = create_sql.split(" ON ")
+
+  # Parse out the Index Name
+  idx_split = init_split[0].split(" ")
+  idx_name = idx_split[2]
+ 
+  #Parse the table and columns
+  tbl_split = init_split[1].split("(")
+  tbl_name = tbl_split[0]
+  cols = "(#{tbl_split[1]}"
+
+  converted_alter = "ALTER TABLE #{tbl_name} ADD INDEX #{idx_name} #{cols}"
+  consoleDebug(converted_alter)
+  return converted_alter
+
+end
+
+####
+# Run the native SQL command
+####
+def run_native_sql(sql)
+  
+  consoleDebug("Just run this SQL:")
+  consoleDebug(sql)
+
+  require 'open3'
+  Open3.popen3(
+      "mysql",
+      "--user=#{test_db_username}",
+      "--password=#{test_db_password}",
+      "--execute=#{sql}",
+      test_db_name) {|stdin, stdout, stderr|
+      output = stdout.gets(nil)
+      error = stderr.gets(nil)
+
+    if !error.nil? 
+      abort "ERROR: Native mysql alter failed: #{error}"   
+    end
+          
+    consoleDebug(output)
+  }
+
+end
+
+####
+# run the liquibase command, checking for changelog file and fetching
+# it 1st if it's missing and we're allowed to grab it w/out prompting.
+####  
+def run_liquibase_command(command, download_changelog_if_necessary=true)
+            
+    # verify that the changelog file has already been downloaded
+    if !File.exists?(test_db_change_log_dir)
+        abort "ERROR: #{test_db_change_log_dir} does not exist. Make sure you've configured the directory." 
+    elsif !File.exists?("#{test_db_change_log_dir}/#{test_db_change_log_file}")
+        abort "ERROR: no changelogs found in #{test_db_change_log_dir}. Make sure you've specified the proper changelog." 
+    end
+    
+    if !exists?(:test_db_username)
+        abort "ERROR: 'test_db_username' variable must be set in order to run liquibase tasks"
+    end
+    
+    if !exists?(:test_db_password)
+        abort "ERROR: 'test_db_password' variable must be set in order to run liquibase tasks"
+    end
+    
+    # build the command string        
+    liquibase_command = "cd #{test_db_change_log_dir} && #{test_db_liquibase_script} \
+--driver=#{test_db_driver} \
+--classpath=#{test_db_classpath} \
+--username=#{test_db_username} \
+--password=#{test_db_password} \
+--url=#{test_db_url} \
+--changeLogFile=#{test_db_change_log_file} \
+--logLevel=info \
+#{command}"
+    
+    consoleDebug("Running liquibase command: #{liquibase_command}")
+
+    require 'open3'
+    Open3.popen3(
+        test_db_liquibase_script,
+        "--driver=#{test_db_driver}",
+        "--classpath=#{test_db_classpath}",
+        "--username=#{test_db_username}",
+        "--password=#{test_db_password}",
+        "--url=#{test_db_url}",
+        "--changeLogFile=#{test_db_change_log_file}",
+        "--logLevel=info",
+        command) {|stdin, stdout, stderr|
+
+        output = stdout.gets(nil)
+        error = stderr.gets(nil)
+
+      return output
+    }
+end
+
+####
+# Find old _XXX_old tables from prior pt-osc runs and drop them.
+####
+def clean_pt_osc_tables()
+  
+  consoleDebug("Clean up old tables (i.e. _blah_old) from pt-osc runs...")
+  consoleDebug(" ")
+  findSql = "show tables like \"_%_old\""
+
+  require 'open3'
+  Open3.popen3(
+      "mysql",
+      "--user=#{test_db_username}",
+      "--password=#{test_db_password}",
+      "-r",
+      "-s",
+      "-N",
+      "--execute=#{findSql}",
+      test_db_name) {|stdin, stdout, stderr|
+      output = stdout.gets(nil)
+      error = stderr.gets(nil)
+
+    if !error.nil? 
+      abort "ERROR: Couldn't find old tables: #{error}"   
+    end
+          
+    for line in output.split(/\r?\n/)
+      drop_table = "DROP TABLE #{line}"
+      consoleDebug(drop_table)
+      run_native_sql(drop_table)
+    end
+  }
+
+end
+
+####
+# Helper function for some light debugging.
+####
+def consoleDebug(str)
+
+  if str.nil?
+    return
+  end
+
+  if exists?(:test_liquibase_verbose) and test_liquibase_verbose
+    puts "[DEBUG]: #{str}"
+    puts " "
+  end
+
+end
+

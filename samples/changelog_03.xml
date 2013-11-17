@@ -1,0 +1,52 @@
+<databaseChangeLog
+  xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+         http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-2.0.xsd">
+
+    <changeSet id="1" author="mike">
+        <createTable tableName="user_department">
+            <column name="user_id" type="int">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="department_id" type="int">
+                 <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="active" type="boolean" defaultValueBoolean="true"/>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="2" author="mike">
+        <comment>Add index on (department)</comment>
+        <createIndex tableName="user_department" indexName="idx_depts">
+            <column name="department_id"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="3" author="mike">
+        <comment>Add Foreign key from limit_fact to user_department</comment>
+        <addForeignKeyConstraint baseTableName="user_department"
+                                 baseColumnNames="user_id"
+                                 constraintName="fk_user_id"
+                                 referencedTableName="users"
+                                 referencedColumnNames="id"/>
+    </changeSet>
+
+    <changeSet id="4" author="mike">
+        <comment>Add Foreign key from limit_fact to user_department</comment>
+        <addForeignKeyConstraint baseTableName="user_department"
+                                 baseColumnNames="department_id"
+                                 constraintName="fk_dept_id"
+                                 referencedTableName="department"
+                                 referencedColumnNames="id"/>
+    </changeSet>
+
+    <changeSet id="5" author="mike">
+        <comment>Add a new column to the users table</comment>
+        <addColumn tableName="users">
+            <column name="last_login" type="timestamp"/>
+        </addColumn>
+    </changeSet>
+
+</databaseChangeLog>
+
